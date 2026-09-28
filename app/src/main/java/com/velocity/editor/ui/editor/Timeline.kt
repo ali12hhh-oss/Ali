@@ -5,6 +5,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -34,6 +35,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -52,12 +54,14 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.velocity.editor.R
+import com.velocity.editor.data.ClipEntity
 import com.velocity.editor.domain.Tracks
 import com.velocity.editor.ui.library.EffectsCatalog
 import com.velocity.editor.ui.theme.VelocityColors
@@ -69,6 +73,7 @@ private val RulerHeight = 24.dp
 private val TrackHeight = 42.dp
 private val TrackGap = 4.dp
 private const val DpPerSecond = 56f
+private const val MinTrimMs = 500L
 
 private fun trackColor(id: String): Color = when (id) {
     Tracks.V1 -> VelocityColors.TrackVideo
@@ -89,6 +94,7 @@ fun TimelinePanel(
     onSelectClip: (Long?) -> Unit,
     onToggleMute: (String) -> Unit,
     onToggleLock: (String) -> Unit,
+    onTrimClip: (Long, Long, Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
@@ -128,8 +134,10 @@ fun TimelinePanel(
                     tracks.forEach { track ->
                         TrackLane(
                             track = track, width = contentDp, selectedClipId = selectedClipId,
+                            density = density,
                             onSelect = { id -> onSelectClip(id); currentOnSeek(tracks.flatMap { it.clips }.first { c -> c.id == id }.startMs) },
                             onTapEmpty = { px -> onSelectClip(null); currentOnSeek(pxToMs(px)) },
+                            onTrim = onTrimClip,
                         )
                         Spacer(Modifier.height(TrackGap))
                     }
@@ -201,11 +209,14 @@ private fun TrackLane(
     track: TrackUi,
     width: Dp,
     selectedClipId: Long?,
+    density: Density,
     onSelect: (Long) -> Unit,
     onTapEmpty: (Float) -> Unit,
+    onTrim: (Long, Long, Long) -> Unit,
 ) {
     val color = trackColor(track.id)
     val currentTapEmpty by rememberUpdatedState(onTapEmpty)
+    val trimmable = track.id == Tracks.V1 || track.id == Tracks.A2
     Box(
         Modifier.width(width).height(TrackHeight).clip(RoundedCornerShape(6.dp))
             .background(Color.White.copy(alpha = 0.04f))
@@ -238,9 +249,54 @@ private fun TrackLane(
                         modifier = Modifier.padding(horizontal = 5.dp),
                     )
                 }
+                if (trimmable) {
+                    TrimHandle(isStart = true, clip = clip, density = density, onTrim = onTrim, modifier = Modifier.align(Alignment.CenterStart))
+                    TrimHandle(isStart = false, clip = clip, density = density, onTrim = onTrim, modifier = Modifier.align(Alignment.CenterEnd))
+                }
             }
         }
     }
+}
+
+/** Drag handle on a clip's left/right edge to trim it — shortens or extends into the source media. */
+@Composable
+private fun TrimHandle(
+    isStart: Boolean,
+    clip: ClipEntity,
+    density: Density,
+    onTrim: (Long, Long, Long) -> Unit,
+    modifier: Modifier,
+) {
+    var trimStart by remember(clip.id) { mutableStateOf(clip.trimStartMs) }
+    var duration by remember(clip.id) { mutableStateOf(clip.durationMs) }
+    Box(
+        modifier
+            .width(14.dp).fillMaxHeight()
+            .pointerInput(clip.id) {
+                detectDragGestures(
+                    onDragStart = {
+                        trimStart = clip.trimStartMs
+                        duration = clip.durationMs
+                    },
+                ) { change, dragAmount ->
+                    change.consume()
+                    val deltaMs = (dragAmount.x / density.density / DpPerSecond * 1000f).toLong()
+                    val cap = clip.sourceDurationMs.takeIf { it > 0 } ?: (trimStart + duration)
+                    if (isStart) {
+                        val newStart = (trimStart + deltaMs).coerceIn(0L, (cap - MinTrimMs).coerceAtLeast(0L))
+                        val newDuration = (duration - (newStart - trimStart)).coerceAtLeast(MinTrimMs)
+                        trimStart = newStart
+                        duration = newDuration
+                    } else {
+                        val newDuration = (duration + deltaMs).coerceIn(MinTrimMs, (cap - trimStart).coerceAtLeast(MinTrimMs))
+                        duration = newDuration
+                    }
+                    onTrim(clip.id, trimStart, duration)
+                }
+            }
+            .padding(3.dp)
+            .background(Color.White.copy(alpha = 0.6f), RoundedCornerShape(3.dp)),
+    )
 }
 
 @Composable
