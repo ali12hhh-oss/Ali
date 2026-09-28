@@ -36,4 +36,8 @@ data class ClipEntity(
     val name: String,
     val startMs: Long,
     val durationMs: Long,
+    /** Offset into the source file where this clip starts playing (trim handle support). */
+    val trimStartMs: Long = 0,
+    /** Full duration of the untrimmed source media, used to bound trim handles. */
+    val sourceDurationMs: Long = 0,
 )

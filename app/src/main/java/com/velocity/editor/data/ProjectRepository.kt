@@ -62,6 +62,16 @@ class ProjectRepository @Inject constructor(
         dao.updateProject(project.copy(mutedTracks = muted.joinToString(",")))
     }
 
+    /** Trims a clip in place. newTrimStartMs is the offset into the source file; newDurationMs is the visible length. */
+    suspend fun trimClip(projectId: Long, clipId: Long, newTrimStartMs: Long, newDurationMs: Long) = withContext(Dispatchers.IO) {
+        val clip = dao.getClips(projectId).firstOrNull { it.id == clipId } ?: return@withContext
+        val cap = clip.sourceDurationMs.takeIf { it > 0 } ?: (newTrimStartMs + newDurationMs)
+        val boundedStart = newTrimStartMs.coerceIn(0L, (cap - MIN_CLIP_MS).coerceAtLeast(0L))
+        val boundedDuration = newDurationMs.coerceIn(MIN_CLIP_MS, (cap - boundedStart).coerceAtLeast(MIN_CLIP_MS))
+        dao.updateClips(listOf(clip.copy(trimStartMs = boundedStart, durationMs = boundedDuration)))
+        refresh(projectId)
+    }
+
     private suspend fun appendClips(projectId: Long, trackId: String, uris: List<Uri>) {
         var cursor = dao.getClips(projectId)
             .filter { it.trackId == trackId }
@@ -72,6 +82,7 @@ class ProjectRepository @Inject constructor(
             val clip = ClipEntity(
                 projectId = projectId, trackId = trackId, uri = uri.toString(),
                 name = name, startMs = cursor, durationMs = duration,
+                trimStartMs = 0, sourceDurationMs = duration,
             )
             cursor += duration
             clip
@@ -80,15 +91,22 @@ class ProjectRepository @Inject constructor(
         refresh(projectId)
     }
 
-    /** Re-packs the main video track, rebuilds transition markers and updates project metadata. */
+    /** Re-packs the video and music tracks sequentially, rebuilds transition markers, updates project metadata. */
     private suspend fun refresh(projectId: Long) {
         val project = dao.getProject(projectId) ?: return
         val all = dao.getClips(projectId)
-        var cursor = 0L
+
+        var v1Cursor = 0L
         val v1 = all.filter { it.trackId == Tracks.V1 }.sortedBy { it.startMs }.map { c ->
-            c.copy(startMs = cursor).also { cursor += c.durationMs }
+            c.copy(startMs = v1Cursor).also { v1Cursor += c.durationMs }
         }
         dao.updateClips(v1)
+
+        var a2Cursor = 0L
+        val a2 = all.filter { it.trackId == Tracks.A2 }.sortedBy { it.startMs }.map { c ->
+            c.copy(startMs = a2Cursor).also { a2Cursor += c.durationMs }
+        }
+        dao.updateClips(a2)
 
         dao.deleteTrackClips(projectId, Tracks.V2)
         val tid = project.transitionId
@@ -139,5 +157,6 @@ class ProjectRepository @Inject constructor(
 
     private companion object {
         const val TRANSITION_MS = 1_000L
+        const val MIN_CLIP_MS = 500L
     }
 }

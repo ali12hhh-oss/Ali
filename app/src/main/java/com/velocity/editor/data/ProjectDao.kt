@@ -47,7 +47,7 @@ interface ProjectDao {
     suspend fun deleteTrackClips(projectId: Long, trackId: String)
 }
 
-@Database(entities = [ProjectEntity::class, ClipEntity::class], version = 1, exportSchema = false)
+@Database(entities = [ProjectEntity::class, ClipEntity::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun projectDao(): ProjectDao
 }
