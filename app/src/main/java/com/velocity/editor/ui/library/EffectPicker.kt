@@ -49,8 +49,8 @@ fun EffectSection(
     items: List<EffectItem>,
     premiumUnlocked: Boolean,
     isSelected: (EffectItem) -> Boolean,
-    onClick: (EffectItem) -> Unit,
     showHeader: Boolean = true,
+    onClick: (EffectItem) -> Unit,
 ) {
     Column {
         if (showHeader) SectionHeader(title)
