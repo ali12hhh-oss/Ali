@@ -16,14 +16,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -68,20 +66,11 @@ import com.velocity.editor.data.ClipEntity
 import com.velocity.editor.domain.Addon
 import com.velocity.editor.ui.components.BackButton
 import com.velocity.editor.ui.components.ExportPill
-import com.velocity.editor.ui.components.SectionHeader
 import com.velocity.editor.ui.components.VelocityTopBar
 import com.velocity.editor.ui.theme.VelocityColors
 import com.velocity.editor.util.formatMmSs
 
-private val tileColors = listOf(
-    listOf(Color(0xFF1E6F7A), Color(0xFF12323A)),
-    listOf(Color(0xFF3B4C7A), Color(0xFF1A1F3A)),
-    listOf(Color(0xFF7A4B1E), Color(0xFF3A210F)),
-    listOf(Color(0xFF6B2E7A), Color(0xFF2E1238)),
-    listOf(Color(0xFF2E7D4F), Color(0xFF133D26)),
-    listOf(Color(0xFF7A2E3B), Color(0xFF38121A)),
-)
-
+/** Video/Audio media browser. Filters, transitions and titles now live in the editor's Effects sheet for live preview. */
 @Composable
 fun LibraryScreen(
     initialTab: Int,
@@ -90,8 +79,8 @@ fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var tab by rememberSaveable { mutableIntStateOf(initialTab) }
-    val tabs = listOf(R.string.tab_video, R.string.tab_audio, R.string.tab_effects)
+    var tab by rememberSaveable { mutableIntStateOf(initialTab.coerceIn(0, 1)) }
+    val tabs = listOf(R.string.tab_video, R.string.tab_audio)
 
     Column(Modifier.fillMaxSize().background(VelocityColors.Background).statusBarsPadding().navigationBarsPadding()) {
         VelocityTopBar(
@@ -110,8 +99,7 @@ fun LibraryScreen(
         }
         when (tab) {
             0 -> VideoTab(state.videoClips, viewModel::addVideo, viewModel::deleteClips)
-            1 -> AudioTab(state.audioClips, state.addons[Addon.MUSIC_LIBRARY] != false, viewModel::addAudio, viewModel::deleteClips)
-            else -> EffectsTab(state, viewModel)
+            else -> AudioTab(state.audioClips, state.addons[Addon.MUSIC_LIBRARY] != false, viewModel::addAudio, viewModel::deleteClips)
         }
     }
 }
@@ -225,73 +213,6 @@ private fun AudioTab(
                     Text(formatMmSs(clip.durationMs), fontSize = 11.sp, color = VelocityColors.TextSecondary)
                 }
                 IconButton(onClick = { onDelete(listOf(clip.id)) }) { Icon(Icons.Outlined.Delete, null, tint = VelocityColors.TextSecondary) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EffectsTab(state: LibraryUiState, viewModel: LibraryViewModel) {
-    val context = LocalContext.current
-    val hint = stringResource(R.string.locked_hint)
-    val project = state.project
-    val transitionsOn = state.addons[Addon.CINEMATIC_TRANSITIONS] != false
-    val filtersOn = state.addons[Addon.ADVANCED_FILTERS] != false
-
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        item {
-            EffectSection(R.string.section_transitions, EffectsCatalog.transitions, transitionsOn, { project?.transitionId == it.id }) {
-                if (it.premium && !transitionsOn) Toast.makeText(context, hint, Toast.LENGTH_SHORT).show()
-                else viewModel.setTransition(if (project?.transitionId == it.id) null else it.id)
-            }
-        }
-        item {
-            EffectSection(R.string.section_filters, EffectsCatalog.filters, filtersOn, { (project?.filterId ?: "original") == it.id }) {
-                if (it.premium && !filtersOn) Toast.makeText(context, hint, Toast.LENGTH_SHORT).show()
-                else viewModel.setFilter(if (it.id == "original") null else it.id)
-            }
-        }
-        item {
-            EffectSection(R.string.section_titles, EffectsCatalog.titles, true, { (project?.titleId ?: "none") == it.id }) {
-                viewModel.setTitle(if (it.id == "none") null else it.id)
-            }
-        }
-    }
-}
-
-@Composable
-private fun EffectSection(
-    title: Int,
-    items: List<EffectItem>,
-    premiumUnlocked: Boolean,
-    isSelected: (EffectItem) -> Boolean,
-    onClick: (EffectItem) -> Unit,
-) {
-    Column {
-        SectionHeader(title)
-        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(items, key = { it.id }) { item ->
-                val index = items.indexOf(item)
-                val selected = isSelected(item)
-                val locked = item.premium && !premiumUnlocked
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(92.dp).clickable { onClick(item) }) {
-                    Box(
-                        Modifier.fillMaxWidth().height(76.dp).clip(RoundedCornerShape(12.dp))
-                            .background(Brush.verticalGradient(tileColors[index % tileColors.size]))
-                            .then(if (selected) Modifier.border(2.dp, VelocityColors.Teal, RoundedCornerShape(12.dp)) else Modifier),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(item.icon, null, tint = Color.White.copy(alpha = if (locked) 0.4f else 0.95f), modifier = Modifier.size(28.dp))
-                        if (locked) Icon(Icons.Outlined.Lock, null, tint = Color.White, modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).size(14.dp))
-                        if (selected) {
-                            Box(
-                                Modifier.align(Alignment.TopStart).padding(6.dp).size(18.dp).clip(CircleShape).background(VelocityColors.Teal),
-                                contentAlignment = Alignment.Center,
-                            ) { Icon(Icons.Outlined.Check, null, tint = Color.White, modifier = Modifier.size(12.dp)) }
-                        }
-                    }
-                    Text(stringResource(item.label), fontSize = 12.sp, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
-                }
             }
         }
     }
