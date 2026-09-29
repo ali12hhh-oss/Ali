@@ -33,7 +33,7 @@ import androidx.compose.ui.unit.sp
 import com.velocity.editor.ui.components.SectionHeader
 import com.velocity.editor.ui.theme.VelocityColors
 
-/** Shared by the Library screen and the in-editor Effects sheet, so both render filters/transitions/titles identically. */
+/** Shared by the Library screen and the in-editor Effects strip, so both render filters/transitions/titles identically. */
 val effectTileColors = listOf(
     listOf(Color(0xFF1E6F7A), Color(0xFF12323A)),
     listOf(Color(0xFF3B4C7A), Color(0xFF1A1F3A)),
@@ -43,6 +43,11 @@ val effectTileColors = listOf(
     listOf(Color(0xFF7A2E3B), Color(0xFF38121A)),
 )
 
+/**
+ * A horizontal picker of effect items. By default each tile shows the item's icon on a gradient.
+ * Pass [tileContent] to render an actual live preview of what the option does instead (a real
+ * filtered video frame, a styled text sample, a tiny animated transition demo, etc).
+ */
 @Composable
 fun EffectSection(
     title: Int,
@@ -50,6 +55,7 @@ fun EffectSection(
     premiumUnlocked: Boolean,
     isSelected: (EffectItem) -> Boolean,
     showHeader: Boolean = true,
+    tileContent: (@Composable (EffectItem, Boolean, Modifier) -> Unit)? = null,
     onClick: (EffectItem) -> Unit,
 ) {
     Column {
@@ -62,11 +68,15 @@ fun EffectSection(
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(92.dp).clickable { onClick(item) }) {
                     Box(
                         Modifier.fillMaxWidth().height(76.dp).clip(RoundedCornerShape(12.dp))
-                            .background(Brush.verticalGradient(effectTileColors[index % effectTileColors.size]))
+                            .then(if (tileContent == null) Modifier.background(Brush.verticalGradient(effectTileColors[index % effectTileColors.size])) else Modifier)
                             .then(if (selected) Modifier.border(2.dp, VelocityColors.Teal, RoundedCornerShape(12.dp)) else Modifier),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(item.icon, null, tint = Color.White.copy(alpha = if (locked) 0.4f else 0.95f), modifier = Modifier.size(28.dp))
+                        if (tileContent != null) {
+                            tileContent(item, locked, Modifier.matchParentSize())
+                        } else {
+                            Icon(item.icon, null, tint = Color.White.copy(alpha = if (locked) 0.4f else 0.95f), modifier = Modifier.size(28.dp))
+                        }
                         if (locked) Icon(Icons.Outlined.Lock, null, tint = Color.White, modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).size(14.dp))
                         if (selected) {
                             Box(
