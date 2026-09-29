@@ -19,7 +19,7 @@
     <string name="tool_edit">Split</string>
     <string name="tool_media">Media</string>
     <string name="tool_audio">Audio</string>
-    <string name="tool_effects">Effects</string>
+    <string name="tool_effects">Filters</string>
     <string name="tool_text">Text</string>
     <string name="tool_properties">Properties</string>
     <string name="track_transitions">Transitions</string>
@@ -100,4 +100,6 @@
     <string name="ttl_minimal">Minimal</string>
     <string name="split_select_hint">Select a clip on the timeline first</string>
     <string name="split_edge_hint">Move the playhead further from the clip\'s edge to split</string>
+    <string name="close">Close</string>
+    <string name="text_placeholder">Type your caption…</string>
 </resources>
