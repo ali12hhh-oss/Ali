@@ -16,10 +16,10 @@
     <string name="export">تصدير</string>
     <string name="editor_project_name">اسم المشروع: %1$s</string>
     <string name="timeline">المحرر الزمني</string>
-    <string name="tool_edit">تحرير</string>
+    <string name="tool_edit">قص</string>
     <string name="tool_media">الوسائط</string>
     <string name="tool_audio">الصوت</string>
-    <string name="tool_effects">المؤثرات</string>
+    <string name="tool_effects">الفلاتر</string>
     <string name="tool_text">نص</string>
     <string name="tool_properties">الخصائص</string>
     <string name="track_transitions">الانتقالات</string>
@@ -74,7 +74,7 @@
     <string name="lang_en">English</string>
     <string name="lang_ar">العربية</string>
     <string name="about">حول التطبيق</string>
-    <string name="about_text">Velocity محرر فيديو احترافي للجوال: خط زمني متعدد المسارات، مؤثرات، فلاتر وتصدير عالي الجودة.</string>
+    <string name="about_text">Velocity محرر فيديو احترافي للجوال: خط زمني متعدد المسارات، فلاتر، انتقالات وتصدير عالي الجودة.</string>
     <string name="version_value">الإصدار %1$s</string>
     <string name="delete_project">حذف المشروع</string>
     <string name="tpl_travel">سفر</string>
@@ -98,4 +98,8 @@
     <string name="ttl_classic">كلاسيكي</string>
     <string name="ttl_bold">عريض</string>
     <string name="ttl_minimal">بسيط</string>
+    <string name="split_select_hint">اختر مقطعاً على الخط الزمني أولاً</string>
+    <string name="split_edge_hint">ابعد المؤشر عن طرف المقطع أكثر لتتمكن من القص</string>
+    <string name="close">إغلاق</string>
+    <string name="text_placeholder">اكتب نصك هنا…</string>
 </resources>
