@@ -41,6 +41,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCut
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.MusicNote
@@ -52,6 +53,8 @@ import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -85,7 +88,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.velocity.editor.R
@@ -113,8 +115,10 @@ private enum class EditorTool(@StringRes val label: Int, val icon: ImageVector) 
 }
 
 private enum class EffectsSubTab(@StringRes val label: Int) {
-    Filters(R.string.section_filters), Titles(R.string.section_titles), Transitions(R.string.section_transitions)
+    Filters(R.string.section_filters), Transitions(R.string.section_transitions)
 }
+
+private const val MinSplitMs = 500L
 
 private fun mediaItemFor(clip: ClipEntity): MediaItem =
     MediaItem.Builder().setUri(clip.uri)
@@ -132,7 +136,7 @@ private fun seekTrack(player: ExoPlayer, clips: List<ClipEntity>, targetMs: Long
     player.seekTo(index, (targetMs - clip.startMs).coerceIn(0L, clip.durationMs))
 }
 
-/** Mirrors VideoExporter's/PreviewEffects' filter look, but as an android.graphics.ColorMatrix for a static thumbnail. */
+/** Mirrors VideoExporter's filter look, but as an android.graphics.ColorMatrix for a static thumbnail. */
 private fun filterColorMatrix(id: String?): ColorMatrix? = when (id) {
     "bw" -> ColorMatrix().apply { setSaturation(0f) }
     "vivid" -> contrastMatrix(1.25f)
@@ -220,7 +224,22 @@ private fun TransitionPreviewTile(id: String, modifier: Modifier) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, UnstableApi::class)
+/** Every tool panel gets an explicit close button, so it always has a guaranteed way to collapse. */
+@Composable
+private fun ToolPanelHeader(title: Int, onClose: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(stringResource(title), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = VelocityColors.TextPrimary, modifier = Modifier.weight(1f))
+        Icon(
+            Icons.Outlined.Close, stringResource(R.string.close), tint = VelocityColors.TextSecondary,
+            modifier = Modifier.size(20.dp).clickable(onClick = onClose),
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(
     onBack: () -> Unit,
@@ -268,6 +287,8 @@ fun EditorScreen(
     }
 
     val hint = stringResource(R.string.locked_hint)
+    val splitSelectHint = stringResource(R.string.split_select_hint)
+    val splitEdgeHint = stringResource(R.string.split_edge_hint)
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) viewModel.addVideo(uris)
     }
@@ -292,9 +313,9 @@ fun EditorScreen(
     LaunchedEffect(v1Muted, volume) { exoPlayer.volume = if (v1Muted) 0f else volume }
     LaunchedEffect(a2Muted, volume) { musicPlayer.volume = if (a2Muted) 0f else volume }
     LaunchedEffect(speed) { exoPlayer.setPlaybackSpeed(speed); musicPlayer.setPlaybackSpeed(speed) }
-    LaunchedEffect(state.filterId, state.titleId, state.projectName) {
-        exoPlayer.setVideoEffects(buildPreviewEffects(state.filterId, state.titleId, state.projectName))
-    }
+    // Filters/titles preview only as static thumbnails (see below) \u2014 live GPU preview on the actual
+    // player was removed: ExoPlayer.setVideoEffects() is an experimental API that was destabilizing
+    // playback on some devices. They still apply correctly to the final exported video.
     LaunchedEffect(videoClips) {
         while (true) {
             val base = videoClips.getOrNull(exoPlayer.currentMediaItemIndex)?.startMs ?: 0L
@@ -409,6 +430,7 @@ fun EditorScreen(
 
         if (activeTool == EditorTool.Effects) {
             Column(Modifier.background(VelocityColors.Surface)) {
+                ToolPanelHeader(R.string.tool_effects) { activeTool = null }
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp)) {
                     EffectsSubTab.values().forEach { sub ->
                         Text(
@@ -431,13 +453,6 @@ fun EditorScreen(
                             else viewModel.setFilter(if (it.id == "original") null else it.id)
                         }
                     }
-                    EffectsSubTab.Titles -> EffectSection(
-                        R.string.section_titles, EffectsCatalog.titles, true,
-                        { (state.titleId ?: "none") == it.id }, showHeader = false,
-                        tileContent = { item, _, m -> TitlePreviewTile(item.id, m) },
-                    ) {
-                        viewModel.setTitle(if (it.id == "none") null else it.id)
-                    }
                     EffectsSubTab.Transitions -> {
                         val unlocked = state.addons[Addon.CINEMATIC_TRANSITIONS] != false
                         EffectSection(
@@ -454,6 +469,20 @@ fun EditorScreen(
             }
         } else if (activeTool == EditorTool.Text) {
             Column(Modifier.background(VelocityColors.Surface).padding(bottom = 8.dp)) {
+                ToolPanelHeader(R.string.tool_text) { activeTool = null }
+                var textInput by remember(state.titleText) { mutableStateOf(state.titleText.orEmpty()) }
+                OutlinedTextField(
+                    value = textInput,
+                    onValueChange = { textInput = it; viewModel.setTitleText(it.ifBlank { null }) },
+                    placeholder = { Text(stringResource(R.string.text_placeholder)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = VelocityColors.Teal, unfocusedBorderColor = VelocityColors.Outline,
+                        focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                        cursorColor = VelocityColors.Teal,
+                    ),
+                )
                 EffectSection(
                     R.string.section_titles, EffectsCatalog.titles, true,
                     { (state.titleId ?: "none") == it.id },
@@ -464,6 +493,7 @@ fun EditorScreen(
             }
         } else if (activeTool == EditorTool.Speed) {
             Column(Modifier.background(VelocityColors.Surface).padding(horizontal = 20.dp, vertical = 10.dp)) {
+                ToolPanelHeader(R.string.speed) { activeTool = null }
                 Text("${stringResource(R.string.speed)}  ${"%.1f".format(speed)}x", fontSize = 13.sp, color = VelocityColors.TextSecondary)
                 Slider(
                     value = speed, onValueChange = { speed = it }, valueRange = 0.5f..2f,
@@ -488,7 +518,15 @@ fun EditorScreen(
                         when (tool) {
                             EditorTool.Media -> { activeTool = null; onOpenLibrary(state.projectId, 0) }
                             EditorTool.Audio -> { activeTool = null; onOpenLibrary(state.projectId, 1) }
-                            EditorTool.Split -> selectedClip?.let { /* split handled in a later pass */ }
+                            EditorTool.Split -> {
+                                val clip = state.tracks.flatMap { it.clips }.firstOrNull { it.id == selectedClip }
+                                when {
+                                    clip == null -> Toast.makeText(context, splitSelectHint, Toast.LENGTH_SHORT).show()
+                                    (positionMs - clip.startMs) < MinSplitMs || (clip.startMs + clip.durationMs - positionMs) < MinSplitMs ->
+                                        Toast.makeText(context, splitEdgeHint, Toast.LENGTH_SHORT).show()
+                                    else -> viewModel.splitSelected(clip.id, positionMs)
+                                }
+                            }
                             else -> toggleTool(tool)
                         }
                     }.padding(vertical = 4.dp),
