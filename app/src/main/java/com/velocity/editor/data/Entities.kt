@@ -16,6 +16,8 @@ data class ProjectEntity(
     val transitionId: String? = null,
     val filterId: String? = null,
     val titleId: String? = null,
+    /** Custom caption text typed by the user; falls back to the project name when null/blank. */
+    val titleText: String? = null,
 )
 
 @Entity(
@@ -36,8 +38,6 @@ data class ClipEntity(
     val name: String,
     val startMs: Long,
     val durationMs: Long,
-    /** Offset into the source file where this clip starts playing (trim handle support). */
     val trimStartMs: Long = 0,
-    /** Full duration of the untrimmed source media, used to bound trim handles. */
     val sourceDurationMs: Long = 0,
 )

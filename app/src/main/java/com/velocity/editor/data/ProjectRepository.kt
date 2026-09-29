@@ -55,6 +55,10 @@ class ProjectRepository @Inject constructor(
         refresh(projectId)
     }
 
+    suspend fun setTitleText(projectId: Long, text: String?) = withContext(Dispatchers.IO) {
+        dao.getProject(projectId)?.let { dao.updateProject(it.copy(titleText = text)) }
+    }
+
     suspend fun toggleMute(projectId: Long, trackId: String) = withContext(Dispatchers.IO) {
         val project = dao.getProject(projectId) ?: return@withContext
         val muted = project.mutedTracks.split(",").filter { it.isNotBlank() }.toMutableSet()
@@ -69,6 +73,22 @@ class ProjectRepository @Inject constructor(
         val boundedStart = newTrimStartMs.coerceIn(0L, (cap - MIN_CLIP_MS).coerceAtLeast(0L))
         val boundedDuration = newDurationMs.coerceIn(MIN_CLIP_MS, (cap - boundedStart).coerceAtLeast(MIN_CLIP_MS))
         dao.updateClips(listOf(clip.copy(trimStartMs = boundedStart, durationMs = boundedDuration)))
+        refresh(projectId)
+    }
+
+    /** Splits a clip into two at the given offset (ms) from the clip's own start. */
+    suspend fun splitClip(projectId: Long, clipId: Long, offsetWithinClipMs: Long) = withContext(Dispatchers.IO) {
+        val clip = dao.getClips(projectId).firstOrNull { it.id == clipId } ?: return@withContext
+        if (offsetWithinClipMs < MIN_CLIP_MS || clip.durationMs - offsetWithinClipMs < MIN_CLIP_MS) return@withContext
+        val updatedFirst = clip.copy(durationMs = offsetWithinClipMs)
+        val second = clip.copy(
+            id = 0,
+            trimStartMs = clip.trimStartMs + offsetWithinClipMs,
+            durationMs = clip.durationMs - offsetWithinClipMs,
+            startMs = clip.startMs + offsetWithinClipMs,
+        )
+        dao.updateClips(listOf(updatedFirst))
+        dao.insertClips(listOf(second))
         refresh(projectId)
     }
 
