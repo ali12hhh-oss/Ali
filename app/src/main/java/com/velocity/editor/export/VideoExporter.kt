@@ -61,6 +61,8 @@ data class ExportRequest(
     val bitrateMbps: Int,
     val filterId: String?,
     val titleId: String?,
+    /** Custom caption text; falls back to projectName when null/blank. */
+    val titleText: String?,
     val watermark: Boolean,
 )
 
@@ -129,7 +131,8 @@ class VideoExporter @Inject constructor(@ApplicationContext private val context:
         videoEffects += FrameDropEffect.createDefaultFrameDropEffect(request.fps.toFloat())
 
         val overlays = mutableListOf<TextureOverlay>()
-        request.titleId?.let { titleOverlay(it, request.projectName) }?.let { overlays += it }
+        val captionText = request.titleText?.takeIf { it.isNotBlank() } ?: request.projectName
+        request.titleId?.let { titleOverlay(it, captionText) }?.let { overlays += it }
         if (request.watermark) overlays += watermarkOverlay()
         if (overlays.isNotEmpty()) videoEffects += OverlayEffect(ImmutableList.copyOf(overlays))
 
