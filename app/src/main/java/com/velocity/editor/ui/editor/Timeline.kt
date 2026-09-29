@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,9 +71,11 @@ import java.util.Random
 
 private val HeaderWidth = 76.dp
 private val RulerHeight = 24.dp
-private val TrackHeight = 42.dp
-private val TrackGap = 4.dp
-private const val DpPerSecond = 56f
+private val TrackHeight = 44.dp
+private val TrackGap = 5.dp
+const val BasePxPerSecond = 56f
+const val MinZoom = 0.4f
+const val MaxZoom = 5f
 private const val MinTrimMs = 500L
 
 private fun trackColor(id: String): Color = when (id) {
@@ -82,7 +85,8 @@ private fun trackColor(id: String): Color = when (id) {
     else -> VelocityColors.TrackVoice
 }
 
-/** The timeline always flows left-to-right, in both languages, like every professional editor. */
+/** The timeline always flows left-to-right, in both languages, like every professional editor.
+ * Pinch with two fingers anywhere on the track area to zoom in/out. */
 @Composable
 fun TimelinePanel(
     tracks: List<TrackUi>,
@@ -90,6 +94,8 @@ fun TimelinePanel(
     totalMs: Long,
     isPlaying: Boolean,
     selectedClipId: Long?,
+    zoom: Float,
+    onZoomChange: (Float) -> Unit,
     onSeek: (Long) -> Unit,
     onSelectClip: (Long?) -> Unit,
     onToggleMute: (String) -> Unit,
@@ -99,13 +105,15 @@ fun TimelinePanel(
 ) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         val density = LocalDensity.current
+        val pxPerSecond = BasePxPerSecond * zoom
         val scroll = rememberScrollState()
         var viewportPx by remember { mutableIntStateOf(0) }
         val viewportDp = with(density) { viewportPx.toDp().value }
-        val contentDp = maxOf(totalMs / 1000f * DpPerSecond + 120f, viewportDp).dp
+        val contentDp = maxOf(totalMs / 1000f * pxPerSecond + 120f, viewportDp).dp
         val totalHeight = RulerHeight + (TrackHeight + TrackGap) * tracks.size
         val currentOnSeek by rememberUpdatedState(onSeek)
-        val playheadDp = positionMs / 1000f * DpPerSecond
+        val currentOnZoom by rememberUpdatedState(onZoomChange)
+        val playheadDp = positionMs / 1000f * pxPerSecond
 
         LaunchedEffect(positionMs, isPlaying) {
             if (isPlaying) {
@@ -114,7 +122,7 @@ fun TimelinePanel(
             }
         }
 
-        fun pxToMs(px: Float): Long = (px / density.density / DpPerSecond * 1000f).toLong()
+        fun pxToMs(px: Float): Long = (px / density.density / pxPerSecond * 1000f).toLong()
 
         Row(modifier) {
             Column(Modifier.width(HeaderWidth)) {
@@ -127,14 +135,15 @@ fun TimelinePanel(
             Box(
                 Modifier.weight(1f).height(totalHeight)
                     .onSizeChanged { viewportPx = it.width }
+                    .pointerInput(Unit) { detectTransformGestures { _, _, zoomChange, _ -> currentOnZoom(zoomChange) } }
                     .horizontalScroll(scroll),
             ) {
                 Column(Modifier.width(contentDp)) {
-                    Ruler(contentDp, onSeekPx = { currentOnSeek(pxToMs(it)) })
+                    Ruler(contentDp, pxPerSecond, onSeekPx = { currentOnSeek(pxToMs(it)) })
                     tracks.forEach { track ->
                         TrackLane(
                             track = track, width = contentDp, selectedClipId = selectedClipId,
-                            density = density,
+                            density = density, pxPerSecond = pxPerSecond,
                             onSelect = { id -> onSelectClip(id); currentOnSeek(tracks.flatMap { it.clips }.first { c -> c.id == id }.startMs) },
                             onTapEmpty = { px -> onSelectClip(null); currentOnSeek(pxToMs(px)) },
                             onTrim = onTrimClip,
@@ -142,12 +151,8 @@ fun TimelinePanel(
                         Spacer(Modifier.height(TrackGap))
                     }
                 }
-                Box(
-                    Modifier.offset(x = playheadDp.dp - 1.dp).width(2.dp).height(totalHeight).background(Color.White),
-                )
-                Box(
-                    Modifier.offset(x = playheadDp.dp - 5.dp).size(10.dp).clip(CircleShape).background(Color.White),
-                )
+                Box(Modifier.offset(x = playheadDp.dp - 1.dp).width(2.dp).height(totalHeight).background(Color.White))
+                Box(Modifier.offset(x = playheadDp.dp - 5.dp).size(10.dp).clip(CircleShape).background(Color.White))
             }
         }
     }
@@ -156,7 +161,11 @@ fun TimelinePanel(
 @Composable
 private fun TrackHeader(track: TrackUi, onToggleMute: (String) -> Unit, onToggleLock: (String) -> Unit) {
     val isAudio = track.id == Tracks.A1 || track.id == Tracks.A2 || track.id == Tracks.V1
-    Column(Modifier.height(TrackHeight).padding(end = 6.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center) {
+    Column(
+        Modifier.height(TrackHeight).clip(RoundedCornerShape(6.dp)).background(VelocityColors.SurfaceHigh)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(track.id, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 12.sp, color = VelocityColors.TextPrimary)
             Spacer(Modifier.width(6.dp))
@@ -183,7 +192,7 @@ private fun TrackHeader(track: TrackUi, onToggleMute: (String) -> Unit, onToggle
 }
 
 @Composable
-private fun Ruler(width: Dp, onSeekPx: (Float) -> Unit) {
+private fun Ruler(width: Dp, pxPerSecond: Float, onSeekPx: (Float) -> Unit) {
     val measurer = rememberTextMeasurer()
     val currentSeek by rememberUpdatedState(onSeekPx)
     val labelStyle = TextStyle(color = VelocityColors.TextSecondary, fontSize = 9.sp)
@@ -192,14 +201,17 @@ private fun Ruler(width: Dp, onSeekPx: (Float) -> Unit) {
             .pointerInput(Unit) { detectTapGestures { currentSeek(it.x) } }
             .pointerInput(Unit) { detectHorizontalDragGestures { change, _ -> currentSeek(change.position.x) } },
     ) {
-        val pxPerSecond = DpPerSecond.dp.toPx()
-        val seconds = (size.width / pxPerSecond).toInt()
-        for (s in 0..seconds) {
-            val x = s * pxPerSecond
-            val major = s % 5 == 0
+        val pxPerSecondPx = pxPerSecond.dp.toPx()
+        val seconds = (size.width / pxPerSecondPx).toInt()
+        val step = if (pxPerSecondPx < 20) 10 else if (pxPerSecondPx < 40) 5 else 1
+        var s = 0
+        while (s <= seconds) {
+            val x = s * pxPerSecondPx
+            val major = s % (step * 5).coerceAtLeast(1) == 0
             val tick = if (major) 10.dp.toPx() else 5.dp.toPx()
             drawLine(VelocityColors.TextSecondary, Offset(x, size.height - tick), Offset(x, size.height), 1.dp.toPx())
             if (major) drawText(measurer, formatMmSs(s * 1000L), Offset(x + 3.dp.toPx(), 0f), labelStyle)
+            s += step
         }
     }
 }
@@ -210,6 +222,7 @@ private fun TrackLane(
     width: Dp,
     selectedClipId: Long?,
     density: Density,
+    pxPerSecond: Float,
     onSelect: (Long) -> Unit,
     onTapEmpty: (Float) -> Unit,
     onTrim: (Long, Long, Long) -> Unit,
@@ -218,16 +231,16 @@ private fun TrackLane(
     val currentTapEmpty by rememberUpdatedState(onTapEmpty)
     val trimmable = track.id == Tracks.V1 || track.id == Tracks.A2
     Box(
-        Modifier.width(width).height(TrackHeight).clip(RoundedCornerShape(6.dp))
-            .background(Color.White.copy(alpha = 0.04f))
+        Modifier.width(width).height(TrackHeight).clip(RoundedCornerShape(8.dp))
+            .background(VelocityColors.Surface)
             .pointerInput(Unit) { detectTapGestures { currentTapEmpty(it.x) } },
     ) {
         track.clips.forEach { clip ->
             val selected = clip.id == selectedClipId
             Box(
-                Modifier.offset(x = (clip.startMs / 1000f * DpPerSecond).dp)
-                    .width((clip.durationMs / 1000f * DpPerSecond).dp)
-                    .fillMaxHeight().padding(1.dp)
+                Modifier.offset(x = (clip.startMs / 1000f * pxPerSecond).dp)
+                    .width((clip.durationMs / 1000f * pxPerSecond).dp)
+                    .fillMaxHeight().padding(2.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(color.copy(alpha = 0.92f))
                     .then(if (selected) Modifier.border(2.dp, Color.White, RoundedCornerShape(6.dp)) else Modifier)
@@ -250,8 +263,8 @@ private fun TrackLane(
                     )
                 }
                 if (trimmable) {
-                    TrimHandle(isStart = true, clip = clip, density = density, onTrim = onTrim, modifier = Modifier.align(Alignment.CenterStart))
-                    TrimHandle(isStart = false, clip = clip, density = density, onTrim = onTrim, modifier = Modifier.align(Alignment.CenterEnd))
+                    TrimHandle(isStart = true, clip = clip, density = density, pxPerSecond = pxPerSecond, onTrim = onTrim, modifier = Modifier.align(Alignment.CenterStart))
+                    TrimHandle(isStart = false, clip = clip, density = density, pxPerSecond = pxPerSecond, onTrim = onTrim, modifier = Modifier.align(Alignment.CenterEnd))
                 }
             }
         }
@@ -264,6 +277,7 @@ private fun TrimHandle(
     isStart: Boolean,
     clip: ClipEntity,
     density: Density,
+    pxPerSecond: Float,
     onTrim: (Long, Long, Long) -> Unit,
     modifier: Modifier,
 ) {
@@ -272,7 +286,7 @@ private fun TrimHandle(
     Box(
         modifier
             .width(14.dp).fillMaxHeight()
-            .pointerInput(clip.id) {
+            .pointerInput(clip.id, pxPerSecond) {
                 detectDragGestures(
                     onDragStart = {
                         trimStart = clip.trimStartMs
@@ -280,7 +294,7 @@ private fun TrimHandle(
                     },
                 ) { change, dragAmount ->
                     change.consume()
-                    val deltaMs = (dragAmount.x / density.density / DpPerSecond * 1000f).toLong()
+                    val deltaMs = (dragAmount.x / density.density / pxPerSecond * 1000f).toLong()
                     val cap = clip.sourceDurationMs.takeIf { it > 0 } ?: (trimStart + duration)
                     if (isStart) {
                         val newStart = (trimStart + deltaMs).coerceIn(0L, (cap - MinTrimMs).coerceAtLeast(0L))
