@@ -33,6 +33,7 @@ data class EditorUiState(
     val totalMs: Long = 0,
     val filterId: String? = null,
     val titleId: String? = null,
+    val titleText: String? = null,
     val transitionId: String? = null,
     val addons: Map<Addon, Boolean> = emptyMap(),
 )
@@ -60,6 +61,7 @@ class EditorViewModel @Inject constructor(
             totalMs = clips.maxOfOrNull { it.startMs + it.durationMs } ?: 0L,
             filterId = project?.filterId,
             titleId = project?.titleId,
+            titleText = project?.titleText,
             transitionId = project?.transitionId,
             addons = addons,
         )
@@ -79,6 +81,13 @@ class EditorViewModel @Inject constructor(
         viewModelScope.launch { repo.trimClip(projectId, clipId, newTrimStartMs, newDurationMs) }
     }
 
+    fun splitSelected(clipId: Long, atTimelineMs: Long) {
+        val track = state.value.tracks.firstOrNull { t -> t.clips.any { it.id == clipId } } ?: return
+        val clip = track.clips.first { it.id == clipId }
+        val offset = atTimelineMs - clip.startMs
+        viewModelScope.launch { repo.splitClip(projectId, clipId, offset) }
+    }
+
     fun toggleMute(trackId: String) {
         viewModelScope.launch { repo.toggleMute(projectId, trackId) }
     }
@@ -89,5 +98,6 @@ class EditorViewModel @Inject constructor(
 
     fun setFilter(id: String?) { viewModelScope.launch { repo.setFilter(projectId, id) } }
     fun setTitle(id: String?) { viewModelScope.launch { repo.setTitle(projectId, id) } }
+    fun setTitleText(text: String?) { viewModelScope.launch { repo.setTitleText(projectId, text) } }
     fun setTransition(id: String?) { viewModelScope.launch { repo.setTransition(projectId, id) } }
 }
