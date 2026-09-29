@@ -1,9 +1,21 @@
 package com.velocity.editor.ui.editor
 
+import android.graphics.Bitmap
+import android.graphics.Canvas as AndroidCanvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
+import android.media.MediaMetadataRetriever
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -17,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -54,8 +67,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
@@ -82,7 +98,9 @@ import com.velocity.editor.ui.library.EffectSection
 import com.velocity.editor.ui.library.EffectsCatalog
 import com.velocity.editor.ui.theme.VelocityColors
 import com.velocity.editor.util.formatTimecode
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 private enum class EditorTool(@StringRes val label: Int, val icon: ImageVector) {
     Media(R.string.tool_media, Icons.Outlined.VideoLibrary),
@@ -111,6 +129,94 @@ private fun seekTrack(player: ExoPlayer, clips: List<ClipEntity>, targetMs: Long
     val index = clips.indexOfLast { it.startMs <= targetMs }.coerceAtLeast(0)
     val clip = clips[index]
     player.seekTo(index, (targetMs - clip.startMs).coerceIn(0L, clip.durationMs))
+}
+
+/** Mirrors VideoExporter's/PreviewEffects' filter look, but as an android.graphics.ColorMatrix for a static thumbnail. */
+private fun filterColorMatrix(id: String?): ColorMatrix? = when (id) {
+    "bw" -> ColorMatrix().apply { setSaturation(0f) }
+    "vivid" -> contrastMatrix(1.25f)
+    "warm" -> ColorMatrix(
+        floatArrayOf(
+            1.15f, 0f, 0f, 0f, 0f,
+            0f, 1f, 0f, 0f, 0f,
+            0f, 0f, 0.85f, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f,
+        ),
+    )
+    "cool" -> ColorMatrix(
+        floatArrayOf(
+            0.9f, 0f, 0f, 0f, 0f,
+            0f, 1f, 0f, 0f, 0f,
+            0f, 0f, 1.15f, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f,
+        ),
+    )
+    "faded" -> contrastMatrix(0.75f)
+    else -> null
+}
+
+private fun contrastMatrix(scale: Float): ColorMatrix {
+    val t = (1 - scale) * 128f
+    return ColorMatrix(
+        floatArrayOf(
+            scale, 0f, 0f, 0f, t,
+            0f, scale, 0f, 0f, t,
+            0f, 0f, scale, 0f, t,
+            0f, 0f, 0f, 1f, 0f,
+        ),
+    )
+}
+
+/** Real filter preview: takes one actual frame from the current video and applies the filter to it. */
+@Composable
+private fun FilterPreviewTile(id: String, sourceFrame: Bitmap?, modifier: Modifier) {
+    val bitmap = remember(sourceFrame, id) {
+        sourceFrame?.let { src ->
+            val matrix = filterColorMatrix(id)
+            if (matrix == null) {
+                src
+            } else {
+                val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+                val canvas = AndroidCanvas(out)
+                val paint = Paint().apply { colorFilter = ColorMatrixColorFilter(matrix) }
+                canvas.drawBitmap(src, 0f, 0f, paint)
+                out
+            }
+        }
+    }
+    if (bitmap != null) {
+        Image(bitmap.asImageBitmap(), null, modifier, contentScale = ContentScale.Crop)
+    } else {
+        Box(modifier.background(VelocityColors.SurfaceHigh))
+    }
+}
+
+/** Real title preview: an "Aa" sample rendered in the exact weight/size the overlay will use. */
+@Composable
+private fun TitlePreviewTile(id: String, modifier: Modifier) {
+    Box(modifier.background(Color(0xFF14171A)), contentAlignment = Alignment.Center) {
+        when (id) {
+            "classic" -> Text("Aa", color = Color.White, fontSize = 20.sp)
+            "bold" -> Text("Aa", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
+            "minimal" -> Text("Aa", color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp)
+            else -> Text("Aa", color = VelocityColors.TextSecondary, fontSize = 20.sp)
+        }
+    }
+}
+
+/** Real transition preview: a small looping animation matching fade/slide/zoom; other styles get a pulsing demo. */
+@Composable
+private fun TransitionPreviewTile(id: String, modifier: Modifier) {
+    val infinite = rememberInfiniteTransition(label = "transition_preview")
+    val phase by infinite.animateFloat(0f, 1f, infiniteRepeatable(tween(1100), RepeatMode.Restart), label = "phase")
+    Box(modifier.background(Color(0xFF12323A))) {
+        when (id) {
+            "fade" -> Box(Modifier.matchParentSize().background(VelocityColors.TrackVideo.copy(alpha = phase)))
+            "slide" -> Box(Modifier.matchParentSize().offset(x = ((phase - 0.5f) * 50).dp).background(VelocityColors.TrackVideo))
+            "zoom" -> Box(Modifier.matchParentSize().scale(0.55f + phase * 0.45f).background(VelocityColors.TrackVideo))
+            else -> Box(Modifier.matchParentSize().background(VelocityColors.TrackVideo.copy(alpha = 0.3f + phase * 0.5f)))
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, UnstableApi::class)
@@ -142,6 +248,23 @@ fun EditorScreen(
     var activeTool by remember { mutableStateOf<EditorTool?>(null) }
     var effectsSubTab by remember { mutableStateOf(EffectsSubTab.Filters) }
     var zoom by remember { mutableFloatStateOf(1f) }
+
+    // A real frame from the current video, used to render actual filtered thumbnails below.
+    var sourceFrame by remember { mutableStateOf<Bitmap?>(null) }
+    val previewClipUri = videoClips.firstOrNull()?.uri
+    LaunchedEffect(previewClipUri) {
+        sourceFrame = previewClipUri?.let { uriStr ->
+            withContext(Dispatchers.IO) {
+                val retriever = MediaMetadataRetriever()
+                val frame = runCatching {
+                    retriever.setDataSource(context, Uri.parse(uriStr))
+                    retriever.getFrameAtTime(0)
+                }.getOrNull()
+                runCatching { retriever.release() }
+                frame
+            }
+        }
+    }
 
     val hint = stringResource(R.string.locked_hint)
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -192,7 +315,6 @@ fun EditorScreen(
             exoPlayer.pause()
             musicPlayer.pause()
         } else {
-            // Fixes restart: after the clip finishes, ExoPlayer needs an explicit rewind before play() resumes it.
             if (exoPlayer.playbackState == Player.STATE_ENDED || positionMs >= state.totalMs) {
                 seekTo(0)
             }
@@ -216,7 +338,6 @@ fun EditorScreen(
             color = VelocityColors.TextSecondary, fontSize = 11.sp,
         )
 
-        // Preview — filters and title overlay render live via ExoPlayer video effects.
         Box(
             Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().aspectRatio(16f / 9f)
                 .clip(RoundedCornerShape(12.dp)).background(Color.Black),
@@ -232,7 +353,6 @@ fun EditorScreen(
             }
         }
 
-        // Transport controls (always left-to-right, like the reference design)
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = ::togglePlay) {
@@ -253,7 +373,6 @@ fun EditorScreen(
             }
         }
 
-        // Timeline header
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.timeline), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = VelocityColors.TextPrimary)
             Spacer(Modifier.weight(1f))
@@ -287,7 +406,6 @@ fun EditorScreen(
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
         )
 
-        // Inline options strip — opens above the toolbar for whichever tool is active; pressing the tool again closes it.
         if (activeTool == EditorTool.Effects) {
             Column(Modifier.background(VelocityColors.Surface)) {
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp)) {
@@ -303,17 +421,29 @@ fun EditorScreen(
                 when (effectsSubTab) {
                     EffectsSubTab.Filters -> {
                         val unlocked = state.addons[Addon.ADVANCED_FILTERS] != false
-                        EffectSection(R.string.section_filters, EffectsCatalog.filters, unlocked, { (state.filterId ?: "original") == it.id }, showHeader = false) {
+                        EffectSection(
+                            R.string.section_filters, EffectsCatalog.filters, unlocked,
+                            { (state.filterId ?: "original") == it.id }, showHeader = false,
+                            tileContent = { item, _, m -> FilterPreviewTile(item.id, sourceFrame, m) },
+                        ) {
                             if (it.premium && !unlocked) Toast.makeText(context, hint, Toast.LENGTH_SHORT).show()
                             else viewModel.setFilter(if (it.id == "original") null else it.id)
                         }
                     }
-                    EffectsSubTab.Titles -> EffectSection(R.string.section_titles, EffectsCatalog.titles, true, { (state.titleId ?: "none") == it.id }, showHeader = false) {
+                    EffectsSubTab.Titles -> EffectSection(
+                        R.string.section_titles, EffectsCatalog.titles, true,
+                        { (state.titleId ?: "none") == it.id }, showHeader = false,
+                        tileContent = { item, _, m -> TitlePreviewTile(item.id, m) },
+                    ) {
                         viewModel.setTitle(if (it.id == "none") null else it.id)
                     }
                     EffectsSubTab.Transitions -> {
                         val unlocked = state.addons[Addon.CINEMATIC_TRANSITIONS] != false
-                        EffectSection(R.string.section_transitions, EffectsCatalog.transitions, unlocked, { state.transitionId == it.id }, showHeader = false) {
+                        EffectSection(
+                            R.string.section_transitions, EffectsCatalog.transitions, unlocked,
+                            { state.transitionId == it.id }, showHeader = false,
+                            tileContent = { item, _, m -> TransitionPreviewTile(item.id, m) },
+                        ) {
                             if (it.premium && !unlocked) Toast.makeText(context, hint, Toast.LENGTH_SHORT).show()
                             else viewModel.setTransition(if (state.transitionId == it.id) null else it.id)
                         }
@@ -323,7 +453,11 @@ fun EditorScreen(
             }
         } else if (activeTool == EditorTool.Text) {
             Column(Modifier.background(VelocityColors.Surface).padding(bottom = 8.dp)) {
-                EffectSection(R.string.section_titles, EffectsCatalog.titles, true, { (state.titleId ?: "none") == it.id }) {
+                EffectSection(
+                    R.string.section_titles, EffectsCatalog.titles, true,
+                    { (state.titleId ?: "none") == it.id },
+                    tileContent = { item, _, m -> TitlePreviewTile(item.id, m) },
+                ) {
                     viewModel.setTitle(if (it.id == "none") null else it.id)
                 }
             }
@@ -342,7 +476,6 @@ fun EditorScreen(
             }
         }
 
-        // Bottom tool bar — scrolls horizontally so new tools can be added later without crowding.
         Row(
             Modifier.fillMaxWidth().background(VelocityColors.Surface).navigationBarsPadding()
                 .horizontalScroll(rememberScrollState()).padding(vertical = 8.dp),
