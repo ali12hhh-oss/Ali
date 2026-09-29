@@ -94,6 +94,7 @@ class ExportViewModel @Inject constructor(
                 bitrateMbps = current.bitrateMbps,
                 filterId = project.filterId,
                 titleId = project.titleId,
+                titleText = project.titleText,
                 watermark = current.addons[Addon.REMOVE_WATERMARK] == false,
             )
             local.update { it.copy(status = ExportStatus.Running(0f)) }
