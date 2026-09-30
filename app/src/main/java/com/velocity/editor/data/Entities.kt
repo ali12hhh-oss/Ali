@@ -18,6 +18,9 @@ data class ProjectEntity(
     val titleId: String? = null,
     /** Custom caption text typed by the user; falls back to the project name when null/blank. */
     val titleText: String? = null,
+    /** A single image composited over the whole video (logo/sticker style), with adjustable opacity. */
+    val overlayImageUri: String? = null,
+    val overlayOpacity: Float = 0.8f,
 )
 
 @Entity(
